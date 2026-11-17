@@ -2,21 +2,19 @@
 (function (root) {
   var CONFIG = {
     NAME: 'Cube Pop',
-    TAGLINE: 'Tap the arrows, pop the cube!',
-    VERSION: 1,
-    SAVE_KEY: 'cubepop.save.v1',
-    // power-ups: starting bank, unlock level, and how many you earn
-    POWERUPS: {
-      hint:   { start: 3, unlock: 1, every: 1, label: 'Hint',   icon: '💡', desc: 'Lights up a block you can pop right now.' },
-      hammer: { start: 2, unlock: 3, every: 3, label: 'Hammer', icon: '🔨', desc: 'Tap any block to pop it, even if it is blocked.' },
-      wand:   { start: 1, unlock: 6, every: 5, label: 'Wand',   icon: '🪄', desc: 'Pops up to 5 free blocks for you.' }
-    },
-    WAND_POPS: 5,
-    IDLE_NUDGE_SECONDS: 8,
-    MAX_BLOCKS: 140,
-    // soft pastel accents (background tint + pop flashes + confetti)
-    PASTELS: ['#ffb3c7', '#ffd59e', '#fff0a0', '#b8f0c8', '#a8dcff', '#c9b8ff', '#ffc4f0'],
-    ARROW_COLOR: '#1d1f3a'
+    VERSION: 2,
+    SAVE_KEY: 'cubepop.save.v2',
+    OLD_SAVE_KEY: 'cubepop.save.v1',
+    HINT_COOLDOWN: 2.5,       // seconds between free hints
+    IDLE_NUDGE_SECONDS: 8,    // the lightbulb wiggles after this long with no move
+    // grid size per level: grows, then caps so it never gets impossible
+    SIZE_RAMP: [[3, 4], [6, 5], [10, 6], [14, 7], [19, 8], [29, 9]], // [last level, size]
+    SIZE_CAP: 10,
+    ARROW_COLOR: '#23263f',
+    HINT_COLOR: '#f4b62a',
+    BLOCKED_COLOR: '#2f7cf6',
+    BLOCKER_COLOR: '#ff8fb1',
+    PASTELS: ['#ffb3c7', '#ffd59e', '#fff0a0', '#b8f0c8', '#a8dcff', '#c9b8ff', '#ffc4f0']
   };
   if (typeof module === 'object' && module.exports) module.exports = CONFIG; else root.CUBE_CONFIG = CONFIG;
 })(this);

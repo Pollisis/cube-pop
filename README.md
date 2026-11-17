@@ -1,29 +1,24 @@
 # Cube Pop
 
-A calm 3D arrow puzzle for the browser (made for iPad). Original code, art and sounds. No ads, no timer, no lives.
+A calm 3D arrow puzzle for the browser (made for iPad). Original code, look and sounds. No ads, no timer, no lives.
 
 Play: https://pollisis.github.io/cube-pop/
 
 ## How to play
-- **Tap a block** to send it flying the way its arrow points. A dot means the arrow points straight at you.
-- It only goes if **nothing is anywhere in its way** along that line. A blocked block flashes blue, bumps the block in its way (pink) and slides back. Blocked taps cost nothing.
-- **Drag** anywhere to spin the shape; pinch (or mouse wheel) to zoom. The counter at the top shows how many blocks are left; pop them all to clear the level.
-
-## Helpers (free, earned by clearing levels, banked on the device)
-Each one asks before it's used. Using any helper caps that level at 2 stars (3+ uses = 1 star).
-- 💡 **Hint** (from level 1, +1 per new level cleared): lights up a block you can pop now, turning the shape toward you if needed.
-- 🔨 **Hammer** (unlocks at level 3, +1 every 3 levels): pop any one block, even a blocked one. Tap the button again to put it away.
-- 🪄 **Wand** (unlocks at level 6, +1 every 5 levels): pops up to 5 free blocks.
-After 8 idle seconds the Hint button wiggles; on levels 1-3 a free block also wiggles as a tutorial nudge (free).
+- A frosted glass cube has a grid on every side, covered in snake-like arrows. Arrows bend and can run over the cube's edges onto the next side.
+- **Tap an arrow**: it slides along its own path and zooms straight off the cube the way its head points, leaving a faint groove behind.
+- It can only leave if **no other arrow is anywhere straight ahead of its head on that same side**. Arrows on the next side don't count (arrows leave flat off the face). A blocked arrow turns blue, bumps the one in its way (pink flash) and slides back. **No penalty, unlimited tries.**
+- **Drag** to spin the cube; pinch (or mouse wheel) to zoom. Clear every arrow to finish the level.
+- 💡 **Lightbulb** (the only helper): free and unlimited, with a 2.5 s cooldown. It lights up an arrow you can clear right now and turns the cube to show it if needed. It wiggles after 8 idle seconds.
 
 ## Levels
-Endless, generated from the level number (same level every time). Levels 1-20 are a hand-picked ramp (3x3 cube shell, solid cube, heart, 4x4 shell, pyramid, star, flower, cottage, kitty, tree, donut, mushroom, 5x5 shell, ball...), then a 20-shape cycle whose arrows keep getting trickier.
+Endless and the same every time for a given level number. Cube size: 4x4 (levels 1-3), 5x5 (4-6), 6x6 (7-10), 7x7 (11-14), 8x8 (15-19), 9x9 (20-29), then capped at 10x10 from level 30. Past the cap, arrows get a bit longer, bendier and more interlocked for ~40 levels, then it plateaus.
 
-**Always solvable.** The generator builds each level backwards: blocks are placed in reverse pop order, from the center outward, and each new block may only point along a line with no already-placed block on it. Ordering by distance from the center guarantees an outward direction is always available. A greedy solver then double-checks every level (popping a block never blocks another, so greedy is complete). Difficulty comes from how often arrows are aimed through other blocks.
+**Always solvable.** Levels are built backwards: arrows are added in reverse clearing order, and a new arrow is only kept if the straight line ahead of its head is empty of every arrow already placed (and of its own body). Arrows added later may sit in front of earlier ones, which is what makes them interlock. A solver then double-checks every level (clearing an arrow never blocks another, so a greedy solver is complete).
 
 ## Files
-`index.html`, `style.css`, `config.js` (name + tuning), `game.js` (shapes, generator, solver, rules; also runs in Node), `audio.js` (WebAudio synth sounds), `main.js` (three.js rendering, input, helpers, dialogs), `vendor/three.min.js` (three.js r187, MIT).
+`index.html`, `style.css`, `config.js` (name, size ramp, colors), `game.js` (cube grid, rules, generator, solver; also runs in Node), `audio.js` (WebAudio synth sounds), `main.js` (three.js rendering, input, hint, dialogs), `vendor/three.min.js` (three.js r187, MIT).
 
 ## Tests
-- `node tests/unit.js 500` rules + generates 500 levels (each solvable, replayable, deterministic) + 2,880 extra generator runs
-- `PW_PATH=/path/to/playwright node tests/e2e.js http://127.0.0.1:8823/ screenshots` iPad e2e
+- `node tests/unit.js 500` surface/wrapping, blocking rule, 500 generated levels + 200 hard-setting runs
+- `PW_PATH=/path/to/playwright node tests/e2e.js http://127.0.0.1:8823/ screenshots` iPad portrait + landscape

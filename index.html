@@ -5,10 +5,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
-<meta name="theme-color" content="#8b7bff">
+<meta name="theme-color" content="#8fc6ff">
 <title>Cube Pop</title>
-<link rel="icon" href="icon.svg?v=1" type="image/svg+xml">
-<link rel="stylesheet" href="style.css?v=1">
+<link rel="icon" href="icon.svg?v=2" type="image/svg+xml">
+<link rel="stylesheet" href="style.css?v=2">
 </head>
 <body>
 <div id="app">
@@ -23,17 +23,15 @@
   <div id="stage"><canvas id="gl"></canvas></div>
   <div id="toast"></div>
   <div id="powerbar">
-    <button class="pw" data-pw="hint"><span class="ico">💡</span><span class="badge"></span><span class="lbl">Hint</span></button>
-    <button class="pw" data-pw="hammer"><span class="ico">🔨</span><span class="badge"></span><span class="lbl">Hammer</span></button>
-    <button class="pw" data-pw="wand"><span class="ico">🪄</span><span class="badge"></span><span class="lbl">Wand</span></button>
+    <button id="btn-hint" class="pw" aria-label="Hint"><span class="ico">💡</span><span class="cool"></span><span class="lbl">Hint</span></button>
   </div>
   <canvas id="confetti"></canvas>
   <div id="modal" class="hidden"><div class="card"><h2 id="m-title"></h2><div id="m-body"></div><div id="m-buttons"></div></div></div>
   <div id="loading">Loading…</div>
 </div>
-<script src="config.js?v=1"></script>
-<script src="game.js?v=1"></script>
-<script src="audio.js?v=1"></script>
-<script type="module" src="main.js?v=1"></script>
+<script src="config.js?v=2"></script>
+<script src="game.js?v=2"></script>
+<script src="audio.js?v=2"></script>
+<script type="module" src="main.js?v=2"></script>
 </body>
 </html>

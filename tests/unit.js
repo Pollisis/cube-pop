@@ -1,69 +1,112 @@
-// Rules + solvability tests. Usage: node tests/unit.js [levels=500]
+// Rules + solvability tests for the face-grid snake arrows. Usage: node tests/unit.js [levels=500]
 const G = require('../game.js');
-const N = +(process.argv[2] || 500);
+const N_LEVELS = +(process.argv[2] || 500);
 let pass = 0, fail = 0;
 const ok = (c, m) => { if (c) pass++; else { fail++; console.log('FAIL', m); } };
-const mk = (blocks) => blocks.map((b, i) => ({ id: i, p: b[0], d: b[1] }));
-// DIRS: 0 +x, 1 -x, 2 +y, 3 -y, 4 +z, 5 -z
+const X = [1, 0, 0], NX = [-1, 0, 0], Y = [0, 1, 0], NY = [0, -1, 0], Z = [0, 0, 1], NZ = [0, 0, -1];
+// build an arrow from a start cell and a list of moves (each move is an axis on the current face)
+function arrow(B, start, moves) {
+  const a = { cells: [start], out: [], inn: [] }; let c = start;
+  for (const t of moves) { const s = B.step(c, t); a.out.push(t); a.inn.push(s.dir); a.cells.push(s.to); c = s.to; }
+  return a;
+}
+const cellAt = (B, P) => B.byKey[P.join(',')];
 
-// 1. a block with a clear path pops; one with a block anywhere along its ray does not
-{
-  const lv = { blocks: mk([[[0, 0, 0], 0], [[2, 0, 0], 2], [[2, 1, 0], 1]]), max: [2, 1, 0] };
-  const S = G.newState(lv);
-  ok(!G.isFree(S, 0), 'block 0 blocked by block at distance 2');
-  const r = G.tap(S, 0); ok(!r.ok && r.why === 'blocked' && r.blocker === 1 && r.dist === 2, 'tap reports blocker + distance');
-  ok(S.left === 3, 'blocked tap removes nothing (no penalty)');
+// 1. the surface: 6*N*N cells, every cell has 4 distinct neighbours, steps are reversible, wraps go to the right face
+for (const N of [2, 4, 7, 10]) {
+  const B = G.makeBoard(N); ok(B.count === 6 * N * N, 'cell count N=' + N);
+  let good = true;
+  for (const cell of B.cells) {
+    const seen = new Set();
+    for (const t of B.faceDirs(cell.id)) {
+      const s = B.step(cell.id, t); if (s.to == null) { good = false; continue; } seen.add(s.to);
+      const back = B.step(s.to, G.neg(s.dir)); if (back.to !== cell.id) good = false;
+      if (s.wrap && B.cells[s.to].f !== G.dirIndex(t)) good = false;
+    }
+    if (seen.size !== 4) good = false;
+  }
+  ok(good, 'neighbours valid + reversible + wrap onto correct face (N=' + N + ')');
 }
-{
-  const lv = { blocks: mk([[[0, 0, 0], 0], [[2, 0, 0], 2], [[2, 1, 0], 1]]), max: [2, 1, 0] };
-  const S = G.newState(lv);
-  ok(G.isFree(S, 2) === true, 'block 2 has a clear path to the left');
-  ok(G.tap(S, 1).ok === false, 'block 1 (+y) blocked by block 2 above it');
-  ok(G.tap(S, 2).ok, 'pop 2'); ok(G.tap(S, 1).ok, 'then 1 is free'); const r = G.tap(S, 0); ok(r.ok && r.won, 'then 0, level won');
-  ok(G.tap(S, 0).why === 'gone', 'popped block cannot be tapped again');
-}
-// 2. two blocks pointing at each other is a deadlock; solver must say so
-{
-  const b = mk([[[0, 0, 0], 0], [[1, 0, 0], 1]]);
-  ok(G.solve(b, [1, 0, 0]) === null, 'facing pair is unsolvable');
-  const b2 = mk([[[0, 0, 0], 1], [[1, 0, 0], 0]]);
-  ok(Array.isArray(G.solve(b2, [1, 0, 0])), 'back-to-back pair is solvable');
-}
-// 3. hammer (force) removes even a blocked block
-{
-  const S = G.newState({ blocks: mk([[[0, 0, 0], 0], [[1, 0, 0], 1]]), max: [1, 0, 0] });
-  ok(G.freeBlocks(S).length === 0, 'deadlock has no free blocks'); ok(G.force(S, 0).ok, 'force pops'); ok(G.isFree(S, 1), 'other now free');
-}
-// 4. stars
-ok(G.starsFor(0) === 3 && G.starsFor(1) === 2 && G.starsFor(2) === 2 && G.starsFor(3) === 1, 'stars 3/2/2/1');
 
-// 5. every generated level is solvable, deterministic, and the solution replays through the real rules
-const t0 = Date.now(); let worst = 0, totalBlocks = 0; const freeRatio = [];
-for (let n = 1; n <= N; n++) {
+// 2. blocking: only the straight ray from the head, on the head's own face, counts
+{
+  const N = 4, B = G.makeBoard(N);
+  // front face (+z): cells have P.z = 4, x,y in {-3,-1,1,3}
+  const a = arrow(B, cellAt(B, [-3, -1, 4]), [X]);          // (-3,-1)->(-1,-1), head points +x
+  const b = arrow(B, cellAt(B, [3, -3, 4]), [Y, Y]);         // sits at x=3 column, crosses y=-1: on a's ray
+  const lv = { N, arrows: [a, b] }; let S = G.newState(lv);
+  ok(!G.isFree(S, 0) && G.blockerOf(S, 0).id === 1 && G.blockerOf(S, 0).dist === 2, 'arrow blocked by another arrow 2 cells ahead on the same face');
+  const r = G.tap(S, 0); ok(!r.ok && r.why === 'blocked' && S.left === 2, 'blocked tap changes nothing (no penalty)');
+  ok(G.isFree(S, 1), 'b (pointing +y, nothing ahead) is free');
+  ok(G.tap(S, 1).ok && G.isFree(S, 0) && G.tap(S, 0).won, 'after b leaves, a is free; level won');
+  // something on the next face along the same line does NOT block (arrows leave tangent to the face)
+  const c = arrow(B, cellAt(B, [-3, 3, 4]), [X]);            // top row of front face, points +x toward the +x face
+  const d = arrow(B, cellAt(B, [4, 3, 3]), [NZ, NZ]);        // on the +x face, right around the corner, in line with c
+  S = G.newState({ N, arrows: [c, d] });
+  ok(G.isFree(S, 0), 'an arrow on the neighbouring face in line with the ray does not block');
+  // the arrow's own path never blocks itself in play
+  const e = arrow(B, cellAt(B, [3, 3, 4]), [NY, NY, NX]);    // L shape, head points -x
+  S = G.newState({ N, arrows: [e] }); ok(G.isFree(S, 0), 'own body behind the head is not a blocker');
+}
+
+// 3. wrapping bodies: a body that runs over an edge occupies cells on both faces and blocks there
+{
+  const N = 4, B = G.makeBoard(N);
+  const w = arrow(B, cellAt(B, [-1, 1, 4]), [Y, Y]);         // front face going up, wraps onto the top face
+  ok(B.cells[w.cells[0]].f === 4 && B.cells[w.cells[2]].f === 2, 'body wraps from the front face onto the top face');
+  ok(G.headDir(w).join() === NZ.join(), 'after wrapping, the head points away from the front face (-z on top)');
+  const t = arrow(B, cellAt(B, [3, 4, 3]), [NX]);            // on top face, head (1,4,3) points -x across row z=3: w's body is at (-1,4,3)
+  let S = G.newState({ N, arrows: [w, t] });
+  ok(!G.isFree(S, 1) && G.blockerOf(S, 1).id === 0, 'the wrapped part of a body blocks arrows on the other face');
+  ok(G.isFree(S, 0), 'wrapped arrow (head ray on top face toward -z) is free');
+  ok(G.tap(S, 0).ok && G.isFree(S, 1), 'once it leaves, its cells on both faces are empty');
+  const rv = G.reversed(w);
+  ok(rv.cells[0] === w.cells[2] && G.headDir(rv).join() === NY.join(), 'reversing a wrapped arrow flips its head direction correctly');
+}
+// 4. two arrows aimed at each other = deadlock; solver must say so
+{
+  const N = 4, B = G.makeBoard(N);
+  const a = arrow(B, cellAt(B, [-3, 1, 4]), [X]), b = arrow(B, cellAt(B, [3, 1, 4]), [NX]);
+  ok(G.solve({ N, arrows: [a, b] }) === null, 'facing arrows are unsolvable (solver detects it)');
+}
+
+// 5. generated levels: always solvable, solution replays, deterministic, density + interlock + wraps
+const t0 = Date.now(); let worst = 0; const stats = {};
+for (let n = 1; n <= N_LEVELS; n++) {
   const t = Date.now(); const lv = G.generateLevel(n); worst = Math.max(worst, Date.now() - t);
-  const cells = new Set(lv.blocks.map((b) => b.p.join(',')));
-  ok(cells.size === lv.blocks.length, 'level ' + n + ' no overlapping blocks');
-  ok(lv.blocks.length === G.SHAPES[lv.shape]().length, 'level ' + n + ' uses the whole shape');
-  ok(lv.solution && lv.solution.length === lv.blocks.length, 'level ' + n + ' solver found an order');
+  const B = G.makeBoard(lv.N), seen = new Set(); let overlap = false, adj = true, selfRay = false;
+  for (const a of lv.arrows) {
+    for (const c of a.cells) { if (seen.has(c)) overlap = true; seen.add(c); }
+    for (let k = 1; k < a.cells.length; k++) if (B.step(a.cells[k - 1], a.out[k - 1]).to !== a.cells[k]) adj = false;
+    if (G.headRay(B, a).some((c) => a.cells.includes(c))) selfRay = true;
+    if (a.cells.length < 2) adj = false;
+  }
+  ok(!overlap, `level ${n}: every cell used by at most one arrow`);
+  ok(adj, `level ${n}: every arrow is a connected orthogonal path (len >= 2)`);
+  ok(!selfRay, `level ${n}: no arrow points into its own body`);
   const S = G.newState(lv); let good = true;
-  for (const id of lv.solution) { const r = G.tap(S, id); if (!r.ok) { good = false; break; } }
-  ok(good && S.left === 0, 'level ' + n + ' solution replays to a win');
-  // random play never gets stuck: from any state, some block is free (removals never block others)
-  const R = G.newState(lv), rnd = G.mulberry32(n);
-  while (R.left) { const f = G.freeBlocks(R); if (!f.length) { ok(false, 'level ' + n + ' random play got stuck'); break; } G.tap(R, f[Math.floor(rnd() * f.length)]); }
-  const again = G.generateLevel(n);
-  ok(JSON.stringify(again.blocks) === JSON.stringify(lv.blocks), 'level ' + n + ' is the same every time');
-  totalBlocks += lv.blocks.length; freeRatio.push(lv.freeAtStart / lv.blocks.length);
+  for (const id of lv.solution) if (!G.tap(S, id).ok) { good = false; break; }
+  ok(good && S.left === 0, `level ${n}: solver order replays to a win`);
+  const R = G.newState(lv), rnd = G.mulberry32(n); // random casual play never gets stuck
+  while (R.left) { const f = G.freeArrows(R); if (!f.length) { ok(false, `level ${n}: random play got stuck`); break; } G.tap(R, f[Math.floor(rnd() * f.length)]); }
+  if (n <= 60 || n % 25 === 0) ok(JSON.stringify(G.generateLevel(n).arrows) === JSON.stringify(lv.arrows), `level ${n}: deterministic`);
+  const s = stats[lv.N] = stats[lv.N] || { lv: [], cov: [], arrows: [], free: [], depth: [], wraps: [], maxLen: 0, ms: [] };
+  s.lv.push(n); s.cov.push(lv.coverage); s.arrows.push(lv.arrows.length); s.free.push(lv.freeAtStart / lv.arrows.length); s.depth.push(lv.depth); s.wraps.push(lv.wraps / lv.arrows.length);
+  s.maxLen = Math.max(s.maxLen, ...lv.arrows.map((a) => a.cells.length));
+  ok(lv.coverage >= 0.6, `level ${n}: coverage ${(lv.coverage * 100).toFixed(0)}%`);
 }
-// 6. the generator on raw shapes over many seeds and difficulties
+// 6. raw generator over many seeds at the hardest settings
 let gens = 0;
-for (const name in G.SHAPES) for (let s = 0; s < 40; s++) for (const h of [0, 0.5, 0.95]) {
-  const g = G.generate(G.SHAPES[name](), h, G.mulberry32(s * 31 + name.length)); gens++;
-  if (!G.solve(g.blocks, g.max)) ok(false, 'shape ' + name + ' seed ' + s + ' hard ' + h + ' unsolvable');
-  else pass++;
+for (let s = 0; s < 200; s++) {
+  const p = Object.assign(G.levelParams(400), { interlock: 1, bend: 0.6, maxLen: 14 });
+  const g = G.generate(10, p, G.mulberry32(s + 999)); gens++;
+  ok(!!G.solve(g), 'raw generator seed ' + s + ' solvable');
 }
-const avg = (a) => a.reduce((x, y) => x + y, 0) / a.length;
-console.log(`levels 1-${N}: avg ${(totalBlocks / N).toFixed(0)} blocks, ${(avg(freeRatio.slice(0, 10)) * 100).toFixed(0)}% free at start (1-10) -> ${(avg(freeRatio.slice(-50)) * 100).toFixed(0)}% (last 50), slowest ${worst} ms, ${Date.now() - t0} ms total`);
-console.log(`${gens} extra generator runs over ${Object.keys(G.SHAPES).length} shapes`);
+const avg = (a) => a.reduce((x, y) => x + y, 0) / a.length, pct = (x) => (x * 100).toFixed(0) + '%';
+for (const N of Object.keys(stats).sort((a, b) => a - b)) {
+  const s = stats[N];
+  console.log(`N=${N} (levels ${s.lv[0]}-${s.lv[s.lv.length - 1]}): ${avg(s.arrows).toFixed(0)} arrows, coverage ${pct(avg(s.cov))}, free at start ${pct(avg(s.free))}, chain depth ${avg(s.depth).toFixed(1)} (max ${Math.max(...s.depth)}), wrapping arrows ${pct(avg(s.wraps))}, longest ${s.maxLen}`);
+}
+console.log(`${N_LEVELS} levels in ${Date.now() - t0} ms (slowest ${worst} ms); ${gens} extra hard-setting generator runs`);
 console.log(`${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

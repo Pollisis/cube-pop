@@ -1,4 +1,9 @@
-// Cube Pop rules, shapes, level generator and solver. Runs in the browser and in Node.
+// Cube Pop v2 rules: a cube with an N x N grid on every face, covered in snake-like arrows.
+// Runs in the browser and in Node (tests).
+//
+// Coordinates: the cube is centered at the origin with side N. Cell centers are stored in
+// "doubled" integer coordinates P (real position = P / 2), so a cell on the face with normal n
+// has P.n = N and its other two coordinates are odd numbers in (-N, N).
 (function (root, factory) {
   var C = (typeof module === 'object' && module.exports) ? require('./config.js') : root.CUBE_CONFIG;
   var G = factory(C);
@@ -6,7 +11,15 @@
 })(this, function (C) {
   'use strict';
   var DIRS = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]];
-  var key = function (x, y, z) { return x + ',' + y + ',' + z; };
+  // in-face axes for each face (u, v); any perpendicular pair works
+  var UF = [[0, 0, -1], [0, 0, 1], [1, 0, 0], [1, 0, 0], [1, 0, 0], [-1, 0, 0]];
+  var VF = [[0, 1, 0], [0, 1, 0], [0, 0, -1], [0, 0, 1], [0, 1, 0], [0, 1, 0]];
+  var dot = function (a, b) { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; };
+  var add = function (a, b, k) { k = k == null ? 1 : k; return [a[0] + b[0] * k, a[1] + b[1] * k, a[2] + b[2] * k]; };
+  var neg = function (a) { return [-a[0], -a[1], -a[2]]; };
+  var cross = function (a, b) { return [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]; };
+  var dirIndex = function (t) { for (var i = 0; i < 6; i++) if (DIRS[i][0] === t[0] && DIRS[i][1] === t[1] && DIRS[i][2] === t[2]) return i; return -1; };
+  var pkey = function (p) { return p[0] + ',' + p[1] + ',' + p[2]; };
 
   function mulberry32(a) {
     return function () {
@@ -17,245 +30,177 @@
     };
   }
 
-  // ---------- shapes (lists of integer cells) ----------
-  function box(a, b, c, hollow) {
-    var out = [];
-    for (var x = 0; x < a; x++) for (var y = 0; y < b; y++) for (var z = 0; z < c; z++) {
-      if (hollow && x > 0 && y > 0 && z > 0 && x < a - 1 && y < b - 1 && z < c - 1) continue;
-      out.push([x, y, z]);
+  // ---------- the cube surface ----------
+  var boardCache = {};
+  function makeBoard(N) {
+    if (boardCache[N]) return boardCache[N];
+    var cells = [], byKey = {};
+    for (var f = 0; f < 6; f++) for (var j = 0; j < N; j++) for (var i = 0; i < N; i++) {
+      var P = add(add(DIRS[f].map(function (x) { return x * N; }), UF[f], 2 * i + 1 - N), VF[f], 2 * j + 1 - N);
+      var id = cells.length; cells.push({ id: id, f: f, i: i, j: j, P: P }); byKey[pkey(P)] = id;
     }
-    return out;
-  }
-  function extrude(rows, depth) {
-    var out = [];
-    for (var r = 0; r < rows.length; r++) for (var x = 0; x < rows[r].length; x++) if (rows[r][x] === 'X')
-      for (var z = 0; z < depth; z++) out.push([x, rows.length - 1 - r, z]);
-    return out;
-  }
-  function ball(r, hollow) {
-    var out = [], R = Math.ceil(r);
-    for (var x = -R; x <= R; x++) for (var y = -R; y <= R; y++) for (var z = -R; z <= R; z++) {
-      var d = Math.sqrt(x * x + y * y + z * z);
-      if (d <= r && (!hollow || d > r - 1.2)) out.push([x, y, z]);
-    }
-    return out;
-  }
-  function pyramid(tiers) {
-    var out = [];
-    for (var t = 0; t < tiers; t++) { var s = tiers - 1 - t; for (var x = -s; x <= s; x++) for (var z = -s; z <= s; z++) out.push([x, t, z]); }
-    return out;
-  }
-  function mushroom() {
-    var out = [];
-    for (var x = -3; x <= 3; x++) for (var y = 0; y <= 3; y++) for (var z = -3; z <= 3; z++)
-      if (x * x + y * y * 1.6 + z * z <= 11.5) out.push([x, y + 3, z]);
-    for (var x2 = -1; x2 <= 1; x2++) for (var y2 = 0; y2 < 3; y2++) for (var z2 = -1; z2 <= 1; z2++) out.push([x2, y2, z2]);
-    return out;
-  }
-  function tree() {
-    var out = [];
-    var layers = [3, 2, 2, 1, 1, 0];
-    for (var i = 0; i < layers.length; i++) { var s = layers[i]; for (var x = -s; x <= s; x++) for (var z = -s; z <= s; z++) if (Math.abs(x) + Math.abs(z) <= s + 1) out.push([x, i + 2, z]); }
-    out.push([0, 0, 0], [0, 1, 0]);
-    return out;
-  }
-  function house() {
-    var out = box(5, 3, 4, false);
-    for (var t = 0; t < 3; t++) for (var x = t; x < 5 - t; x++) for (var z = 0; z < 4; z++) out.push([x, 3 + t, z]);
-    return out;
-  }
-  function donut() {
-    var out = [];
-    for (var x = -4; x <= 4; x++) for (var z = -4; z <= 4; z++) { var d = Math.sqrt(x * x + z * z); if (d >= 1.9 && d <= 4.1) { out.push([x, 0, z]); if (d >= 2.4 && d <= 3.6) out.push([x, 1, z]); } }
-    return out;
-  }
-  function plus3d() {
-    var s = {}, out = [];
-    function add(x, y, z) { var k = key(x, y, z); if (!s[k]) { s[k] = 1; out.push([x, y, z]); } }
-    for (var i = -3; i <= 3; i++) for (var a = -1; a <= 0; a++) for (var b = -1; b <= 0; b++) { add(i, a, b); add(a, i, b); add(a, b, i); }
-    return out;
-  }
-  var BITMAPS = {
-    heart: ['.XX.XX.', 'XXXXXXX', 'XXXXXXX', '.XXXXX.', '..XXX..', '...X...'],
-    star: ['...X...', '..XXX..', 'XXXXXXX', '.XXXXX.', '..XXX..', '.XX.XX.', '.X...X.'],
-    cat: ['X.....X', 'XX...XX', 'XXXXXXX', 'XX.X.XX', 'XXXXXXX', '.XXXXX.'],
-    flower: ['.XX.XX.', 'XXXXXXX', '.XXXXX.', 'XXXXXXX', '.XX.XX.', '...X...', '..XXX..'],
-    duck: ['..XX....', '.XXXX...', '.XXXXX..', '..XX....', '.XXXXXXX', 'XXXXXXXX', '.XXXXXX.'],
-    smile: ['.XXXXX.', 'XX.X.XX', 'XXXXXXX', 'X.XXX.X', 'XX...XX', '.XXXXX.']
-  };
-  var SHAPES = {
-    cube3: function () { return box(3, 3, 3, true); },
-    solid3: function () { return box(3, 3, 3, false); },
-    cube4: function () { return box(4, 4, 4, true); },
-    slab: function () { return box(4, 4, 3, false); },
-    solid4: function () { return box(4, 4, 4, false); },
-    cube5: function () { return box(5, 5, 5, true); },
-    tower: function () { return box(3, 6, 3, false); },
-    brick: function () { return box(5, 4, 3, false); },
-    heart: function () { return extrude(BITMAPS.heart, 2); },
-    bigheart: function () { return extrude(BITMAPS.heart, 3); },
-    star: function () { return extrude(BITMAPS.star, 2); },
-    cat: function () { return extrude(BITMAPS.cat, 2); },
-    flower: function () { return extrude(BITMAPS.flower, 2); },
-    duck: function () { return extrude(BITMAPS.duck, 2); },
-    smile: function () { return extrude(BITMAPS.smile, 2); },
-    pyramid: function () { return pyramid(3); },
-    bigpyramid: function () { return pyramid(4); },
-    mushroom: mushroom,
-    tree: tree,
-    house: house,
-    donut: donut,
-    plus: plus3d,
-    ball: function () { return ball(2.6, false); },
-    bubble: function () { return ball(3.3, true); }
-  };
-  var NAMES = {
-    cube3: 'Little Cube', solid3: 'Sugar Cube', cube4: 'Big Cube', slab: 'Chunky Block', solid4: 'Solid Cube', cube5: 'Giant Cube',
-    tower: 'Tower', brick: 'Brick', heart: 'Heart', bigheart: 'Big Heart', star: 'Star', cat: 'Kitty', flower: 'Flower', duck: 'Duckling',
-    smile: 'Smiley', pyramid: 'Pyramid', bigpyramid: 'Big Pyramid', mushroom: 'Mushroom', tree: 'Pine Tree', house: 'Cottage',
-    donut: 'Donut', plus: 'Jack', ball: 'Ball', bubble: 'Bubble'
-  };
-  // Hand-picked opening, then an endless cycle that slowly gets harder.
-  var OPENING = [
-    ['cube3', 0.05], ['cube3', 0.25], ['solid3', 0.3], ['heart', 0.3], ['cube4', 0.35],
-    ['pyramid', 0.4], ['slab', 0.4], ['star', 0.45], ['flower', 0.45], ['cube4', 0.55],
-    ['house', 0.5], ['cat', 0.5], ['solid4', 0.5], ['tree', 0.55], ['donut', 0.55],
-    ['mushroom', 0.5], ['cube5', 0.55], ['ball', 0.6], ['bigheart', 0.6], ['brick', 0.6]
-  ];
-  var CYCLE = ['plus', 'solid4', 'duck', 'bigpyramid', 'heart', 'tower', 'smile', 'cube5', 'star', 'mushroom', 'bubble', 'cat',
-    'house', 'donut', 'brick', 'tree', 'bigheart', 'plus', 'ball', 'slab'];
-
-  function levelSpec(n) {
-    if (n <= OPENING.length) return { shape: OPENING[n - 1][0], hard: OPENING[n - 1][1] };
-    var i = n - OPENING.length - 1;
-    return { shape: CYCLE[i % CYCLE.length], hard: Math.min(0.9, 0.6 + i * 0.008) };
+    var B = { N: N, cells: cells, byKey: byKey, count: cells.length };
+    // step from cell c moving along axis t (t lies in c's face). Wraps over the cube edge.
+    B.step = function (c, t) {
+      var cell = cells[c], n = DIRS[cell.f], Q = add(cell.P, t, 2);
+      if (Math.abs(dot(Q, t)) < N) return { to: byKey[pkey(Q)], dir: t, wrap: false };
+      var P2 = add(add(cell.P, t), n, -1); // over the edge onto the face whose normal is t
+      return { to: byKey[pkey(P2)], dir: neg(n), wrap: true };
+    };
+    // cells straight ahead of c along t on the SAME face (no wrapping) up to the face edge
+    B.ray = function (c, t) {
+      var out = [], cell = cells[c], Q = cell.P;
+      for (;;) { Q = add(Q, t, 2); if (Math.abs(dot(Q, t)) >= N) return out; out.push(byKey[pkey(Q)]); }
+    };
+    B.faceDirs = function (c) { var f = cells[c].f; return [UF[f], neg(UF[f]), VF[f], neg(VF[f])]; };
+    boardCache[N] = B;
+    return B;
   }
 
-  function normalize(cells) {
-    var mn = [Infinity, Infinity, Infinity];
-    cells.forEach(function (c) { for (var j = 0; j < 3; j++) mn[j] = Math.min(mn[j], c[j]); });
-    return cells.map(function (c) { return [c[0] - mn[0], c[1] - mn[1], c[2] - mn[2]]; });
+  // An arrow is a path of cells from tail to head. out[k] is the direction leaving cell k (on k's face),
+  // inn[k] the direction arriving at cell k+1 (on k+1's face). The head points along inn[last].
+  function headDir(a) { return a.inn[a.inn.length - 1]; }
+  function reversed(a) {
+    var n = a.cells.length, out = [], inn = [];
+    for (var k = 0; k < n - 1; k++) { out.push(neg(a.inn[n - 2 - k])); inn.push(neg(a.out[n - 2 - k])); }
+    return { cells: a.cells.slice().reverse(), out: out, inn: inn };
   }
-  function bounds(cells) {
-    var mx = [0, 0, 0];
-    cells.forEach(function (c) { for (var j = 0; j < 3; j++) mx[j] = Math.max(mx[j], c[j]); });
-    return mx; // inclusive max; min is 0 after normalize
-  }
-
-  // ---------- rules ----------
-  // occ: Set of keys; returns the first blocking cell distance (k>=1) or 0 if the path is clear.
-  function firstBlock(occ, p, d, mx) {
-    var D = DIRS[d];
-    for (var k = 1; ; k++) {
-      var x = p[0] + D[0] * k, y = p[1] + D[1] * k, z = p[2] + D[2] * k;
-      if (x < 0 || y < 0 || z < 0 || x > mx[0] || y > mx[1] || z > mx[2]) return 0;
-      if (occ.has(key(x, y, z))) return k;
-    }
-  }
-
-  // Greedy solver. Removing a block never blocks another one, so if any order works, greedy works.
-  function solve(blocks, mx) {
-    mx = mx || bounds(blocks.map(function (b) { return b.p; }));
-    var occ = new Set(blocks.map(function (b) { return key(b.p[0], b.p[1], b.p[2]); }));
-    var left = blocks.slice(), order = [], progress = true;
-    while (left.length && progress) {
-      progress = false;
-      for (var i = 0; i < left.length; i++) {
-        var b = left[i];
-        if (!firstBlock(occ, b.p, b.d, mx)) { occ.delete(key(b.p[0], b.p[1], b.p[2])); order.push(b.id); left.splice(i, 1); i--; progress = true; }
-      }
-    }
-    return left.length ? null : order;
-  }
-
-  // ---------- generator: reverse construction ----------
-  // Place blocks in reverse removal order. A new block must point along a ray with no already-placed
-  // block on it (those are removed after it). Ordering cells from the center outward guarantees
-  // at least one outward direction is always free, so construction never gets stuck.
-  function generate(cells, hard, rnd) {
-    cells = normalize(cells);
-    var mx = bounds(cells);
-    var ctr = [mx[0] / 2, mx[1] / 2, mx[2] / 2];
-    var all = new Set(cells.map(function (c) { return key(c[0], c[1], c[2]); }));
-    function chain(p, d) { // shape cells on the ray (they must all go first)
-      var D = DIRS[d], n = 0;
-      for (var k = 1; k < 40; k++) { if (all.has(key(p[0] + D[0] * k, p[1] + D[1] * k, p[2] + D[2] * k))) n++; }
-      return n;
-    }
-    for (var attempt = 0; attempt < 8; attempt++) {
-      var noise = attempt < 7 ? hard * 1.4 * (1 - attempt / 7) : 0;
-      var order = cells.map(function (c) {
-        var dx = c[0] - ctr[0], dy = c[1] - ctr[1], dz = c[2] - ctr[2];
-        return { c: c, s: Math.sqrt(dx * dx + dy * dy + dz * dz) + rnd() * noise };
-      }).sort(function (a, b) { return a.s - b.s; });
-      var placed = new Set(), dirs = [], ok = true;
-      for (var i = 0; i < order.length; i++) {
-        var p = order[i].c, free = [];
-        for (var d = 0; d < 6; d++) if (!firstBlock(placed, p, d, mx)) free.push(d);
-        if (!free.length) { ok = false; break; }
-        var pick;
-        if (rnd() < hard) {
-          var best = -1; free.forEach(function (d) { var c = chain(p, d) + rnd() * 0.5; if (c > best) { best = c; pick = d; } });
-        } else pick = free[Math.floor(rnd() * free.length)];
-        dirs.push(pick); placed.add(key(p[0], p[1], p[2]));
-      }
-      if (!ok) continue;
-      var blocks = order.map(function (o, i) { return { p: o.c, d: dirs[i] }; });
-      // stable ids sorted by position so the same seed always gives the same ids
-      blocks.sort(function (a, b) { return (a.p[1] - b.p[1]) || (a.p[0] - b.p[0]) || (a.p[2] - b.p[2]); });
-      blocks.forEach(function (b, i) { b.id = i; });
-      return { blocks: blocks, max: mx, attempts: attempt + 1 };
-    }
-    throw new Error('generator failed');
-  }
-
-  function generateLevel(n) {
-    var spec = levelSpec(n);
-    var rnd = mulberry32(n * 7919 + 17);
-    var cells = SHAPES[spec.shape]();
-    if (cells.length > C.MAX_BLOCKS) cells = cells.slice(0, C.MAX_BLOCKS);
-    var g = generate(cells, spec.hard, rnd);
-    var solution = solve(g.blocks, g.max);
-    if (!solution) throw new Error('unsolvable level ' + n); // never expected; tests check this
-    var st = newState({ blocks: g.blocks, max: g.max });
-    var freeNow = g.blocks.filter(function (b) { return isFree(st, b.id); }).length;
-    return { n: n, shape: spec.shape, name: NAMES[spec.shape], hard: spec.hard, blocks: g.blocks, max: g.max, solution: solution, freeAtStart: freeNow };
-  }
+  function headRay(B, a) { return B.ray(a.cells[a.cells.length - 1], headDir(a)); }
 
   // ---------- play state ----------
   function newState(lv) {
-    var S = { max: lv.max, byId: {}, occ: new Map(), left: 0 };
-    lv.blocks.forEach(function (b) { S.byId[b.id] = b; S.occ.set(key(b.p[0], b.p[1], b.p[2]), b.id); S.left++; });
-    return S;
+    var B = makeBoard(lv.N), occ = new Int32Array(B.count).fill(-1);
+    lv.arrows.forEach(function (a, id) { a.cells.forEach(function (c) { occ[c] = id; }); });
+    return { B: B, lv: lv, occ: occ, alive: lv.arrows.map(function () { return true; }), left: lv.arrows.length };
   }
+  // first other arrow on the head's straight ray (same face only), or null if the way is clear
   function blockerOf(S, id) {
-    var b = S.byId[id], D = DIRS[b.d];
-    for (var k = 1; ; k++) {
-      var x = b.p[0] + D[0] * k, y = b.p[1] + D[1] * k, z = b.p[2] + D[2] * k;
-      if (x < 0 || y < 0 || z < 0 || x > S.max[0] || y > S.max[1] || z > S.max[2]) return null;
-      var o = S.occ.get(key(x, y, z));
-      if (o !== undefined) return { id: o, dist: k };
-    }
+    var a = S.lv.arrows[id], r = headRay(S.B, a);
+    for (var k = 0; k < r.length; k++) { var o = S.occ[r[k]]; if (o >= 0 && o !== id) return { id: o, dist: k + 1 }; }
+    return null;
   }
-  function alive(S, id) { var b = S.byId[id]; return !!b && S.occ.get(key(b.p[0], b.p[1], b.p[2])) === id; }
-  function isFree(S, id) { return alive(S, id) && !blockerOf(S, id); }
-  function remove(S, id) { var b = S.byId[id]; S.occ.delete(key(b.p[0], b.p[1], b.p[2])); S.left--; }
-  // Tap a block: pops it if its path is clear, otherwise reports what blocks it.
+  function isFree(S, id) { return S.alive[id] && !blockerOf(S, id); }
   function tap(S, id) {
-    if (!alive(S, id)) return { ok: false, why: 'gone' };
+    if (!S.alive[id]) return { ok: false, why: 'gone' };
     var bl = blockerOf(S, id);
     if (bl) return { ok: false, why: 'blocked', blocker: bl.id, dist: bl.dist };
-    remove(S, id);
+    S.alive[id] = false; S.left--;
+    S.lv.arrows[id].cells.forEach(function (c) { S.occ[c] = -1; });
     return { ok: true, won: S.left === 0 };
   }
-  function force(S, id) { if (!alive(S, id)) return { ok: false }; remove(S, id); return { ok: true, won: S.left === 0 }; }
-  function freeBlocks(S) { var out = []; for (var id in S.byId) if (isFree(S, +id)) out.push(+id); return out; }
-  function aliveIds(S) { var out = []; S.occ.forEach(function (id) { out.push(id); }); return out; }
-  function starsFor(used) { return used === 0 ? 3 : used <= 2 ? 2 : 1; }
+  function freeArrows(S) { var out = []; for (var i = 0; i < S.alive.length; i++) if (isFree(S, i)) out.push(i); return out; }
+
+  // Greedy solver: removing an arrow never blocks another, so if any order works, greedy works.
+  // Also returns depth = how many "waves" it takes (a measure of how interlocked the level is).
+  function solve(lv) {
+    var S = newState(lv), order = [], depth = 0;
+    while (S.left) {
+      var f = freeArrows(S); if (!f.length) return null;
+      depth++; f.forEach(function (id) { tap(S, id); order.push(id); });
+    }
+    return { order: order, depth: depth };
+  }
+
+  // ---------- generator (reverse construction) ----------
+  // Arrows are added in REVERSE removal order: a new arrow is only kept if its head ray is clear of
+  // every arrow already placed (those are removed after it), and not crossing its own body.
+  // Arrows added later may sit on earlier rays, which is what makes them interlock.
+  function generate(N, p, rnd) {
+    var B = makeBoard(N), occ = new Int32Array(B.count).fill(-1), arrows = [], covered = 0, fails = 0;
+    var target = Math.floor(B.count * p.density);
+    function walk(start, L) {
+      var dirs = B.faceDirs(start), t = dirs[Math.floor(rnd() * 4)];
+      var a = { cells: [start], out: [], inn: [] }, inPath = {}; inPath[start] = 1;
+      var cur = start;
+      while (a.cells.length < L) {
+        var n = DIRS[B.cells[cur].f], side = cross(t, n), opts;
+        if (a.cells.length > 1 && rnd() < p.bend) opts = rnd() < 0.5 ? [side, neg(side), t] : [neg(side), side, t];
+        else opts = rnd() < 0.5 ? [t, side, neg(side)] : [t, neg(side), side];
+        var moved = false;
+        for (var k = 0; k < opts.length; k++) {
+          var s = B.step(cur, opts[k]);
+          if (occ[s.to] >= 0 || inPath[s.to]) continue;
+          if (s.wrap && rnd() > p.wrap) continue;
+          a.out.push(opts[k]); a.inn.push(s.dir); a.cells.push(s.to); inPath[s.to] = 1; cur = s.to; t = s.dir; moved = true; break;
+        }
+        if (!moved) break;
+      }
+      return a;
+    }
+    function rayOk(a) {
+      var own = {}; a.cells.forEach(function (c) { own[c] = 1; });
+      var r = headRay(B, a);
+      for (var k = 0; k < r.length; k++) if (occ[r[k]] >= 0 || own[r[k]]) return false;
+      return true;
+    }
+    var empties = []; for (var c = 0; c < B.count; c++) empties.push(c);
+    // still-free arrows: which arrows have no later arrow on their ray yet (cell -> arrow ids watching it)
+    var watch = {}, freeSet = {};
+    function place(a) {
+      var id = arrows.length; arrows.push(a); a.cells.forEach(function (c) { occ[c] = id; }); covered += a.cells.length;
+      a.cells.forEach(function (c) { (watch[c] || []).forEach(function (w) { delete freeSet[w]; }); });
+      freeSet[id] = 1; headRay(B, a).forEach(function (c) { (watch[c] = watch[c] || []).push(id); });
+    }
+    function blocksCount(a) { var seen = {}, n = 0; a.cells.forEach(function (c) { (watch[c] || []).forEach(function (w) { if (freeSet[w] && !seen[w]) { seen[w] = 1; n++; } }); }); return n; }
+    var tries = 1 + Math.round(p.interlock * 7);
+    while (covered < target && fails < p.maxFails && empties.length) {
+      var best = null, bestScore = -1, late = fails > p.maxFails * 0.6;
+      for (var t = 0; t < (late ? 1 : tries); t++) {
+        var ei = Math.floor(rnd() * empties.length), start = empties[ei];
+        if (occ[start] >= 0) { empties[ei] = empties[empties.length - 1]; empties.pop(); if (!empties.length) break; continue; }
+        var L = p.minLen + Math.floor(rnd() * (p.maxLen - p.minLen + 1));
+        if (late) L = Math.min(L, 2 + Math.floor(rnd() * 3)); // late fill: small arrows
+        var a = walk(start, L);
+        if (a.cells.length < 2) continue;
+        var cands = rnd() < 0.5 ? [a, reversed(a)] : [reversed(a), a];
+        for (var q = 0; q < 2; q++) if (rayOk(cands[q])) {
+          var sc = blocksCount(cands[q]) * 2 + headRay(B, cands[q]).length * 0.15 + cands[q].cells.length * 0.1 + rnd();
+          if (sc > bestScore) { bestScore = sc; best = cands[q]; }
+          break;
+        }
+      }
+      if (best) place(best); else fails++;
+    }
+    // reverse construction gives the removal order back-to-front; shuffle ids so it isn't readable
+    var order = arrows.map(function (_, i) { return i; });
+    for (var i = order.length - 1; i > 0; i--) { var j = Math.floor(rnd() * (i + 1)); var tmp = order[i]; order[i] = order[j]; order[j] = tmp; }
+    return { N: N, arrows: order.map(function (i) { return arrows[i]; }), coverage: covered / B.count };
+  }
+
+  function sizeFor(n) {
+    for (var i = 0; i < C.SIZE_RAMP.length; i++) if (n <= C.SIZE_RAMP[i][0]) return C.SIZE_RAMP[i][1];
+    return C.SIZE_CAP;
+  }
+  function levelParams(n) {
+    var N = sizeFor(n), capStart = C.SIZE_RAMP[C.SIZE_RAMP.length - 1][0] + 1;
+    var past = Math.max(0, n - capStart); // levels beyond the size cap
+    var ramp = Math.min(1, (n - 1) / 30);
+    var extra = Math.min(1, past / 40);    // gentle extra difficulty after the cap, then it plateaus
+    return {
+      N: N,
+      density: (n <= 2 ? 0.62 : 0.7) + 0.12 * ramp + 0.05 * extra,
+      minLen: 2,
+      maxLen: Math.max(4, Math.round(N * 0.8 + 2 * extra + (n % 3))),
+      bend: 0.28 + 0.12 * ramp + 0.08 * extra,
+      wrap: 0.85,
+      interlock: Math.min(1, 0.15 + 0.6 * ramp + 0.25 * extra),
+      maxFails: 1500 + N * 150
+    };
+  }
+  function generateLevel(n) {
+    var p = levelParams(n), rnd = mulberry32(n * 104729 + 7);
+    var g = generate(p.N, p, rnd);
+    var sol = solve(g);
+    if (!sol) throw new Error('unsolvable level ' + n); // cannot happen by construction; tests check it
+    var lv = { n: n, N: p.N, arrows: g.arrows, coverage: g.coverage, solution: sol.order, depth: sol.depth, params: p };
+    var S = newState(lv); lv.freeAtStart = freeArrows(S).length;
+    lv.wraps = g.arrows.filter(function (a) { var f = makeBoard(p.N).cells; return a.cells.some(function (c) { return f[c].f !== f[a.cells[0]].f; }); }).length;
+    return lv;
+  }
 
   return {
-    CONFIG: C, DIRS: DIRS, SHAPES: SHAPES, NAMES: NAMES, mulberry32: mulberry32, levelSpec: levelSpec,
-    generate: generate, generateLevel: generateLevel, solve: solve, newState: newState, tap: tap, force: force,
-    isFree: isFree, alive: alive, blockerOf: blockerOf, freeBlocks: freeBlocks, aliveIds: aliveIds, starsFor: starsFor, bounds: bounds, normalize: normalize
+    CONFIG: C, DIRS: DIRS, UF: UF, VF: VF, mulberry32: mulberry32, makeBoard: makeBoard, headDir: headDir, headRay: headRay, reversed: reversed,
+    newState: newState, blockerOf: blockerOf, isFree: isFree, tap: tap, freeArrows: freeArrows, solve: solve, generate: generate,
+    generateLevel: generateLevel, levelParams: levelParams, sizeFor: sizeFor, dirIndex: dirIndex, dot: dot, add: add, neg: neg
   };
 });
